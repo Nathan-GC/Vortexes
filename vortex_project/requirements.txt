@@ -1,0 +1,11 @@
+# Dépendances du projet « Vortex toroïdaux & moteurs à vortex »
+# Installation :  python -m venv .venv  puis  .venv\Scripts\python -m pip install -r requirements.txt
+numpy>=1.24
+scipy>=1.10
+matplotlib>=3.7
+pillow>=9.5        # export GIF (writer Pillow de matplotlib)
+pytest>=7.4
+
+# Optionnel :
+#   - ffmpeg (exécutable système dans le PATH) pour l'export MP4 ; sinon repli automatique en GIF.
+#   - numba>=0.59 accélère ~10x le noyau de Biot-Savart (détecté automatiquement s'il est installé).
