@@ -53,7 +53,7 @@ from . import theory
 
 # Noms publics du module.
 __all__ = ["AxisymmetricGrid", "RadialSpectralSolver", "AxisymmetricNavierStokesSolver", "run_vortex_ring",
-           "run_coaxial_rings", "velocity_gradient_tensor", "q_criterion", "lambda2_criterion",
+           "run_coaxial_rings", "run_hill_vortex", "velocity_gradient_tensor", "q_criterion", "lambda2_criterion",
            "dissipation_rate", "enstrophy_density", "volume_integral"]
 
 
@@ -443,6 +443,9 @@ class AxisymmetricNavierStokesSolver:
         self._z_ref = float(np.mean([ring["z0"] for ring in rings]))
         # Aucun suivi antérieur : le prochain appel de track_rings classera les anneaux par z croissant.
         self._ring_state = None
+        # Suivi « signé » (pics cherchés sur |ω|) dès qu'une circulation est négative : collision frontale de deux
+        # anneaux de sens opposés, ou anneaux de circulation négative.
+        self._track_signed = any(ring["Gamma"] < 0 for ring in rings)
         # dict(r) copie chaque dictionnaire (l'appelant peut modifier les siens sans effet ici).
         self.ring_params = {"type": "coaxial_rings", "rings": [dict(r) for r in rings]}
 
@@ -452,7 +455,7 @@ class AxisymmetricNavierStokesSolver:
         _, _, phi = self._projected_rhs(self.u, self.w)
         return phi
 
-    def track_rings(self, n_rings=2, peak_threshold=0.2, mass_threshold=0.02, separation=0.2):
+    def track_rings(self, n_rings=2, peak_threshold=0.2, mass_threshold=0.02, separation=0.2, signed=None):
         """Identifie et suit individuellement ``n_rings`` anneaux dans le champ de vorticité.
 
         1. pics : maxima locaux de ω (ndimage.maximum_filter) supérieurs à ``peak_threshold`` × ω_max,
@@ -461,42 +464,54 @@ class AxisymmetricNavierStokesSolver:
         3. moments de Saffman de chaque partie : Γ_i, R_i² = ∬ω r²/∬ω, Z_i = ∬ω r² z/∬ω r² ;
         4. identité : appariement avec l'instant précédent (distance minimale), Z déroulé (continu).
         Renvoie un tableau (n_rings, 3) de colonnes (Γ, R, Z) ; l'anneau 0 est initialement le plus en arrière.
+
+        ``signed`` : si vrai, les pics sont cherchés sur |ω| et chaque partie ne compte que la vorticité du signe de
+        son pic (anneaux de circulations opposées) ; par défaut, vrai si ``init_rings`` a reçu une circulation négative.
         """
         g = self.g
+        # Mode signé : décidé par init_rings si l'appelant ne le précise pas (getattr : faux par défaut).
+        if signed is None:
+            signed = getattr(self, "_track_signed", False)
         # Vorticité aux coins et aires duales associées.
         om = self.vorticity()
         area = g.drf[:, None] * g.dz
-        om_max = om.max()
+        # Champ où l'on cherche les pics : |ω| en mode signé (np.abs), ω sinon (anneaux de circulation positive).
+        om_pk = np.abs(om) if signed else om
+        om_max = om_pk.max()
         # Demi-largeur (en mailles) du voisinage de recherche des maxima : environ 0.15 unité de longueur.
         h = min(g.drc.min(), g.dz)
         k = max(1, int(round(0.15 / h)))
         # ndimage.maximum_filter : maximum glissant sur une fenêtre (2k+1)² ; modes par axe :
         # « nearest » en r (pas de périodicité), « wrap » en z (domaine périodique).
-        mx = ndimage.maximum_filter(om, size=2 * k + 1, mode=("nearest", "wrap"))
+        mx = ndimage.maximum_filter(om_pk, size=2 * k + 1, mode=("nearest", "wrap"))
         # np.argwhere : indices (i, j) des coins qui sont des maxima locaux assez intenses.
-        cand = np.argwhere((om >= mx) & (om > peak_threshold * om_max))
-        # Tri des candidats par vorticité décroissante (np.argsort sur l'opposé).
-        order = np.argsort(-om[cand[:, 0], cand[:, 1]])
-        seeds = []
+        cand = np.argwhere((om_pk >= mx) & (om_pk > peak_threshold * om_max))
+        # Tri des candidats par intensité décroissante (np.argsort sur l'opposé).
+        order = np.argsort(-om_pk[cand[:, 0], cand[:, 1]])
+        # Positions des pics retenus et signe de la vorticité en chacun (+1 en mode non signé).
+        seeds, signs = [], []
         for idx in order:
             i, j = cand[idx]
             r0, z0 = g.rf[i], g.zf[j]
             # On ne garde que des pics bien séparés (distance euclidienne, z périodique).
             if all(np.hypot(r0 - rs, g.periodic_dz(z0, zs)) > separation for rs, zs in seeds):
                 seeds.append((r0, z0))
+                # np.sign : signe de ω au pic (le pic d'une partie négative a ω < 0).
+                signs.append(float(np.sign(om[i, j])) if signed else 1.0)
             if len(seeds) == n_rings:
                 break
-        # Nombre de pics distincts réellement trouvés (< n_rings : cœurs fusionnés ou trop proches).
+        # Nombre de pics distincts réellement trouvés (< n_rings : cœurs fusionnés, annihilés ou trop proches).
         self._last_n_peaks = len(seeds)
         # État précédent (None au premier appel) ; getattr évite une erreur si l'attribut n'existe pas.
         prev = getattr(self, "_ring_state", None)
-        # Pics fusionnés (anneaux trop proches) : on complète avec les positions précédentes.
+        # Pics fusionnés (anneaux trop proches) : on complète avec les positions (et signes) précédents.
         if len(seeds) < n_rings and prev is not None:
-            for Rp, Zp in prev:
+            for Rp, Zp, sp in prev:
                 if len(seeds) == n_rings:
                     break
                 if all(np.hypot(Rp - rs, g.periodic_dz(Zp, zs)) > separation for rs, zs in seeds):
                     seeds.append((Rp, Zp))
+                    signs.append(sp)
         # Moins de pics que d'anneaux : résultat indéfini (NaN).
         if len(seeds) < n_rings:
             return np.full((n_rings, 3), np.nan)
@@ -505,12 +520,12 @@ class AxisymmetricNavierStokesSolver:
         d2 = np.stack([(Rg - rs) ** 2 + g.periodic_dz(Zg, zs) ** 2 for rs, zs in seeds])
         # np.argmin(..., axis=0) : numéro du pic le plus proche pour chaque coin.
         owner = np.argmin(d2, axis=0)
-        # Seuls les coins de vorticité significative sont comptés.
-        mask = om > mass_threshold * om_max
         rings = []
-        for n, (rs, zs) in enumerate(seeds):
-            # Vorticité × aire restreinte à la partie n.
-            wA = np.where(mask & (owner == n), om, 0.0) * area
+        # zip : chaque pic avec le signe de sa vorticité.
+        for n, ((rs, zs), sn) in enumerate(zip(seeds, signs)):
+            # Vorticité × aire restreinte à la partie n : coins attribués au pic n dont la vorticité, du signe du
+            # pic, dépasse le seuil (en mode non signé, sn = +1 : coins de ω > seuil, comme auparavant).
+            wA = np.where((om * sn > mass_threshold * om_max) & (owner == n), om, 0.0) * area
             G = wA.sum()
             m2 = (wA * Rg**2).sum()
             # Position axiale relative au pic (écart périodique), puis moment de Saffman.
@@ -530,8 +545,8 @@ class AxisymmetricNavierStokesSolver:
         else:
             # Premier appel : anneau 0 = le plus en arrière (Z croissant).
             rings.sort(key=lambda rg: rg[2])
-        # Mémorisation (R, Z) pour l'appel suivant.
-        self._ring_state = [(rg[1], rg[2]) for rg in rings]
+        # Mémorisation (R, Z, signe de Γ) pour l'appel suivant (« or 1.0 » : signe +1 si Γ est exactement nul).
+        self._ring_state = [(rg[1], rg[2], float(np.sign(rg[0])) or 1.0) for rg in rings]
         return np.array(rings)
 
     # ------------------------------------------------------------------ second membre
@@ -717,13 +732,15 @@ class AxisymmetricNavierStokesSolver:
         }
 
     # ------------------------------------------------------------------ boucle principale
-    def run(self, t_end, diag_interval=0.1, snapshot_times=(), verbose=False, record_profiles=False, n_rings=0):
+    def run(self, t_end, diag_interval=0.1, snapshot_times=(), verbose=False, record_profiles=False, n_rings=0,
+            callback=None):
         """Intègre jusqu'à ``t_end``. Renvoie {diagnostics (dict de tableaux), snapshots (liste)}.
 
         Les instants de ``snapshot_times`` sont atteints exactement (pas de temps ajusté).
         ``record_profiles`` : enregistre à chaque diagnostic max_r ω(z) et min_r p(z) (diagrammes de
         Hovmöller z–t) dans la clé « profiles ». ``n_rings`` ≥ 2 : suivi individuel des anneaux
-        (clé « rings » : Γ_i(t), R_i(t), Z_i(t)).
+        (clé « rings » : Γ_i(t), R_i(t), Z_i(t)). ``callback`` : fonction appelée après chaque pas avec
+        le solveur en argument (barre de progression, enregistrements supplémentaires).
         """
         # Instants d'instantanés restant à atteindre, triés (sorted) et filtrés.
         events = sorted(t for t in snapshot_times if t >= self.time - 1e-12)
@@ -790,6 +807,10 @@ class AxisymmetricNavierStokesSolver:
                 d = diags[-1]
                 print(f"  t = {self.time:7.3f}  dt = {dt:.4f}  Z = {d['Z']:.4f}  R = {d['R']:.4f}  "
                       f"div = {d['max_div']:.1e}  ({time.perf_counter() - t_wall:5.1f} s)")
+            # Fonction utilisateur optionnelle appelée après chaque pas, avec le solveur en argument
+            # (ex. barre de progression de l'application Streamlit app.py).
+            if callback is not None:
+                callback(self)
         # Conversion de la liste de dictionnaires en dictionnaire de tableaux (une série par clé).
         out = {k: np.array([d[k] for d in diags]) for k in diags[0]}
         # Résultat : diagnostics, instantanés et durée réelle du calcul.
@@ -922,12 +943,13 @@ def volume_integral(snap, field):
 # =============================================================================================
 def run_vortex_ring(R=1.0, a=0.2, Gamma=1.0, Re=1000.0, t_end=20.0, dr=0.025, Lr=8.0, r_uniform=2.2,
                     growth=1.05, Lz=10.0, z0=2.5, cfl=0.8, diag_interval=0.1, snapshot_times=(),
-                    verbose=False, record_profiles=False):
+                    verbose=False, record_profiles=False, callback=None):
     """Simule un anneau de Lamb–Oseen (Re_Γ = Γ/ν) et compare sa vitesse à la théorie.
 
     Renvoie un dict : solver, diagnostics, snapshots, et les vitesses simulée (dZ/dt) et
     théoriques (Saffman, Saffman + Fukumoto–Moffatt) évaluées avec le rayon R(t) mesuré et
     σ(t)² = a² + 4νt. ``record_profiles`` ajoute les profils axiaux pour les diagrammes de Hovmöller.
+    ``callback`` est transmis à :meth:`AxisymmetricNavierStokesSolver.run` (appelé après chaque pas).
     """
     # Grille étirée en r, uniforme en z (Nz = Lz/dr pour des mailles carrées près de l'anneau).
     grid = AxisymmetricGrid.stretched(dr, r_uniform, Lr, growth, Lz, int(round(Lz / dr)))
@@ -935,9 +957,9 @@ def run_vortex_ring(R=1.0, a=0.2, Gamma=1.0, Re=1000.0, t_end=20.0, dr=0.025, Lr
     solver = AxisymmetricNavierStokesSolver(grid, nu=Gamma / Re, cfl=cfl)
     # Condition initiale : anneau gaussien.
     solver.init_lamb_oseen_ring(R, a, Gamma, z0)
-    # Intégration en temps.
+    # Intégration en temps (callback : fonction de suivi éventuelle, appelée après chaque pas).
     res = solver.run(t_end, diag_interval=diag_interval, snapshot_times=snapshot_times, verbose=verbose,
-                     record_profiles=record_profiles)
+                     record_profiles=record_profiles, callback=callback)
     # Séries temporelles des diagnostics et instants correspondants.
     d = res["diagnostics"]
     t = d["t"]
@@ -963,12 +985,14 @@ def run_vortex_ring(R=1.0, a=0.2, Gamma=1.0, Re=1000.0, t_end=20.0, dr=0.025, Lr
 
 
 def run_coaxial_rings(rings, Re=3000.0, t_end=12.0, dr=0.02, Lr=8.0, r_uniform=2.4, growth=1.05, Lz=10.0,
-                      cfl=0.8, diag_interval=0.05, snapshot_times=(), record_profiles=True, verbose=False):
+                      cfl=0.8, diag_interval=0.05, snapshot_times=(), record_profiles=True, verbose=False,
+                      callback=None):
     """Simule plusieurs anneaux coaxiaux visqueux (ex. saute-mouton) avec suivi individuel des cœurs.
 
     ``rings`` : liste de dictionnaires {"R", "a", "Gamma", "z0"} (voir ``init_rings``) ;
     Re est construit sur la plus grande circulation : ν = max|Γ_i| / Re.
     Renvoie le dict de ``run`` complété par solver, grid et params ; « rings » contient Γ_i(t), R_i(t), Z_i(t).
+    ``callback`` est transmis à :meth:`AxisymmetricNavierStokesSolver.run` (appelé après chaque pas).
     """
     # Grille étirée en r et uniforme en z (mailles carrées dans la zone des anneaux).
     grid = AxisymmetricGrid.stretched(dr, r_uniform, Lr, growth, Lz, int(round(Lz / dr)))
@@ -978,10 +1002,38 @@ def run_coaxial_rings(rings, Re=3000.0, t_end=12.0, dr=0.02, Lr=8.0, r_uniform=2
     solver = AxisymmetricNavierStokesSolver(grid, nu=gamma_ref / Re, cfl=cfl)
     # Superposition des anneaux de Lamb–Oseen.
     solver.init_rings(rings)
-    # Intégration avec profils axiaux et suivi des len(rings) cœurs.
+    # Intégration avec profils axiaux et suivi des len(rings) cœurs (callback : fonction de suivi éventuelle).
     res = solver.run(t_end, diag_interval=diag_interval, snapshot_times=snapshot_times, verbose=verbose,
-                     record_profiles=record_profiles, n_rings=len(rings))
+                     record_profiles=record_profiles, n_rings=len(rings), callback=callback)
     # Ajout du solveur, de la grille et des paramètres (copies des dictionnaires d'anneaux) au résultat.
     res.update({"solver": solver, "grid": grid,
                 "params": {"rings": [dict(r) for r in rings], "Re": Re, "nu": solver.nu}})
+    return res
+
+
+def run_hill_vortex(a=1.0, U=1.0, Re=1000.0, t_end=10.0, dr=0.04, Lr=8.0, r_uniform=2.2, growth=1.05, Lz=10.0,
+                    z0=2.5, cfl=0.8, diag_interval=0.1, snapshot_times=(), verbose=False, record_profiles=False,
+                    callback=None):
+    """Simule le vortex sphérique de Hill (rayon a, vitesse U, Γ = 5Ua) dans un fluide visqueux, Re_Γ = Γ/ν.
+
+    En fluide parfait, la sphère avance à U sans se déformer ; la viscosité lisse la discontinuité de vorticité
+    à sa surface, crée un sillage et ralentit le vortex, qui tend vers un anneau. Renvoie le dict de ``run``
+    complété par solver, grid, params, la vitesse simulée U_sim = dZ/dt et la vitesse de Hill U_hill = U.
+    ``callback`` est transmis à :meth:`AxisymmetricNavierStokesSolver.run` (appelé après chaque pas).
+    """
+    # Grille étirée en r, uniforme en z (mailles carrées près du vortex).
+    grid = AxisymmetricGrid.stretched(dr, r_uniform, Lr, growth, Lz, int(round(Lz / dr)))
+    # Circulation du vortex de Hill (Γ = 5Ua) et solveur de viscosité ν = Γ/Re.
+    Gamma = 5.0 * U * a
+    solver = AxisymmetricNavierStokesSolver(grid, nu=Gamma / Re, cfl=cfl)
+    # Condition initiale : vorticité analytique de Hill, ω = 15U r/(2a²) dans la sphère, nulle au-dehors.
+    solver.init_hill_vortex(a, U, z0)
+    # Intégration en temps (callback : fonction de suivi éventuelle, appelée après chaque pas).
+    res = solver.run(t_end, diag_interval=diag_interval, snapshot_times=snapshot_times, verbose=verbose,
+                     record_profiles=record_profiles, callback=callback)
+    d = res["diagnostics"]
+    # Vitesse simulée U = dZ/dt (np.gradient : différences finies centrées) et grandeurs de référence.
+    res.update({"solver": solver, "grid": grid,
+                "params": {"a": a, "U": U, "Gamma": Gamma, "Re": Re, "nu": solver.nu},
+                "U_sim": np.gradient(d["Z"], d["t"]), "U_hill": U})
     return res

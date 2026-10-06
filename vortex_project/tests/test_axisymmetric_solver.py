@@ -132,3 +132,37 @@ def test_energy_budget_and_saffman_speed():
     k = np.argmin(np.abs(d["t"] - 5.0))
     assert res["U_sim"][k] == pytest.approx(res["U_saffman_fm"][k], rel=0.03)
     assert res["U_sim"][k] < res["U_saffman"][k]  # Saffman surestime la vitesse d'un cœur épais
+
+
+def test_suivi_des_anneaux_de_circulations_opposees():
+    """Collision frontale : le suivi « signé » identifie les deux anneaux (Γ > 0 et Γ < 0), qui se rapprochent
+    symétriquement et s'élargissent en approchant du plan de symétrie."""
+    # Deux anneaux identiques de sens opposés (z0 = 3 et 5), grille grossière : calcul de quelques secondes.
+    rings = [{"R": 1.0, "a": 0.2, "Gamma": 1.0, "z0": 3.0}, {"R": 1.0, "a": 0.2, "Gamma": -1.0, "z0": 5.0}]
+    res = ax.run_coaxial_rings(rings, Re=1000.0, t_end=3.0, dr=0.06, diag_interval=0.1)
+    rg = res["rings"]
+    # Deux pics distincts tout au long du calcul ; circulations de signes opposés et quasi conservées.
+    assert rg["n_peaks"].min() == 2
+    assert np.all(rg["Gamma"][:, 0] > 0.9) and np.all(rg["Gamma"][:, 1] < -0.9)
+    # Rapprochement : l'écart axial diminue ; symétrie : le milieu des deux anneaux reste en z = 4.
+    ecart = rg["Z"][:, 1] - rg["Z"][:, 0]
+    assert ecart[-1] < ecart[0] - 0.8
+    assert np.allclose(0.5 * (rg["Z"][:, 0] + rg["Z"][:, 1]), 4.0, atol=0.02)
+    # Élargissement des deux anneaux (méthode des images), de façon identique.
+    assert rg["R"][-1, 0] > rg["R"][0, 0] + 0.1
+    assert rg["R"][-1, 0] == pytest.approx(rg["R"][-1, 1], rel=1e-2)
+
+
+def test_vortex_de_hill_visqueux():
+    """run_hill_vortex : le vortex démarre à la vitesse de Hill U, puis la viscosité le ralentit lentement ;
+    la divergence reste nulle et l'énergie décroît selon le bilan visqueux."""
+    res = ax.run_hill_vortex(a=1.0, U=1.0, Re=5000.0, t_end=2.0, dr=0.05)
+    d = res["diagnostics"]
+    # Vitesse initiale = U (à 1 % près), puis ralentissement modéré.
+    assert res["U_sim"][1] == pytest.approx(1.0, rel=0.01)
+    assert 0.9 < res["U_sim"][-1] < res["U_sim"][1]
+    # Circulation 5Ua et incompressibilité.
+    assert d["circulation"][0] == pytest.approx(5.0, rel=0.02)
+    assert d["max_div"].max() < 1e-10
+    # Énergie perdue = énergie dissipée par viscosité.
+    assert d["energy"][0] - d["energy"][-1] == pytest.approx(trapezoid(d["dissipation"], d["t"]), rel=5e-3)

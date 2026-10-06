@@ -1032,6 +1032,10 @@ def print_pdf(browser, html_path, pdf_path):
 
 
 def main(argv=None):
+    # Sortie console en UTF-8 : sinon le caractère « → » des messages échoue quand la sortie est redirigée
+    # (encodage cp1252 de Windows) ; hasattr : reconfigure n'existe que sur les flux texte standard.
+    if hasattr(sys.stdout, "reconfigure"):
+        sys.stdout.reconfigure(encoding="utf-8")
     # Fichiers à convertir : arguments, sinon tous les .md du dossier docs/.
     args = sys.argv[1:] if argv is None else argv
     keep_html = "--keep-html" in args

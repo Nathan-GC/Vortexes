@@ -30,6 +30,8 @@ Contenu du dossier :
 vortex_project/
 ├── README.md            présentation générale, commandes, résultats clés
 ├── main.py              point d'entrée : lance les calculs et produit toutes les figures
+├── app.py               application web : documentation et simulations dans le navigateur (§ 2.12)
+├── appli/               code de l'application web (un module par rôle, un par volet)
 ├── requirements.txt     bibliothèques Python nécessaires
 ├── docs/                la théorie : rapports .md et .pdf, figures, ce tutoriel
 ├── src/                 le code de calcul (un fichier par grand thème)
@@ -40,7 +42,7 @@ vortex_project/
 │   ├── visualization.py            figures 2D, bilans, diagrammes
 │   └── visualization_3d.py         vues 3D : isosurfaces, tubes, rendu volumique
 ├── exemples/            quatre scripts courts à modifier pour explorer (section 3)
-├── tests/               vérifications automatiques (60 tests)
+├── tests/               vérifications automatiques (73 tests)
 ├── outputs/             résultats produits par main.py (créé au premier lancement)
 └── .venv/               environnement Python du projet (créé à l'installation)
 ```
@@ -86,8 +88,8 @@ Si le dossier `.venv` existe déjà (c'est le cas sur ce PC), passez directement
 .venv\Scripts\python -m pip install -r requirements.txt
 ```
 
-Cette commande installe numpy (tableaux), scipy (fonctions scientifiques), matplotlib (figures), pillow (GIF) et
-pytest (tests).
+Cette commande installe numpy (tableaux), scipy (fonctions scientifiques), matplotlib (figures), pillow (GIF),
+pytest (tests), ainsi que streamlit et plotly pour l'application web (§ 2.12).
 
 Toutes les commandes du tutoriel appellent explicitement `.venv\Scripts\python` : il n'y a rien à « activer ».
 Vous pouvez tout de même activer l'environnement avec `.venv\Scripts\Activate.ps1`, puis écrire simplement
@@ -99,8 +101,13 @@ Vous pouvez tout de même activer l'environnement avec `.venv\Scripts\Activate.p
 .venv\Scripts\python -m pytest
 ```
 
-Le résultat attendu est `60 passed`, en une dizaine de secondes. Chaque test vérifie une propriété physique ou
-numérique : conservation de l'énergie, vitesse de Saffman, divergence nulle, etc.
+Le résultat attendu est `73 passed`, en un peu plus d'une minute. Chaque test vérifie une propriété physique ou
+numérique : conservation de l'énergie, vitesse de Saffman, divergence nulle, etc. Pour une vérification rapide
+(≈ 35 s), les tests longs de l'application web peuvent être écartés :
+
+```bash
+.venv\Scripts\python -m pytest -m "not lent"
+```
 
 ### 2.6 Premier lancement, en mode rapide (≈ 2 min 30)
 
@@ -164,6 +171,23 @@ Après une modification d'un fichier `.md` du dossier `docs/`, ou après `main.p
 .venv\Scripts\python docs\build_pdf.py
 ```
 
+### 2.12 L'application web (Streamlit)
+
+```bash
+.venv\Scripts\python -m streamlit run app.py
+```
+
+Le navigateur s'ouvre sur l'application ; son adresse s'affiche aussi dans le terminal (en général
+`http://localhost:8501`). Pour l'arrêter, revenez dans le terminal et tapez Ctrl+C.
+
+* L'onglet **📚 Théorie & Documentation** s'ouvre sur une page d'accueil : schéma annoté d'un anneau, animation,
+  parcours conseillé en quatre étapes et boutons qui ouvrent directement chaque volet. Le panneau de gauche donne
+  aussi accès au README, aux deux rapports, à ce tutoriel et au glossaire, avec leur sommaire et leur version PDF.
+* L'onglet **🚀 Simulation Interactive** reprend les calculs du projet, volet par volet (§ 3.2).
+
+Pendant un calcul, la documentation reste consultable et un bouton « Annuler » l'interrompt. Les calculs restent
+disponibles si l'on recharge la page, tant que le serveur tourne.
+
 ---
 
 ## 3. Modifier les paramètres de l'écoulement
@@ -184,9 +208,36 @@ $U \approx 0{,}2$ : il parcourt environ 4 rayons en 20 unités de temps.
 
 La partie « moteurs » est en **unités SI** : mètres, m/s, m³/s.
 
-### 3.2 Niveau 1 — les options de la ligne de commande
+### 3.2 Niveau 1 — l'application web (le plus simple)
 
-C'est le plus simple : on ne touche pas au code. Pour comparer deux régimes, envoyez chacun dans son propre
+Lancez l'application (§ 2.12) et ouvrez l'onglet **🚀 Simulation Interactive**. Le panneau de gauche propose cinq
+volets :
+
+| Volet | Méthode et fonction appelée | Paramètres principaux | Durée par défaut |
+|---|---|---|---|
+| Anneau visqueux | Navier–Stokes axisymétrique, `run_vortex_ring` ou `run_hill_vortex` | anneau de Lamb–Oseen ($R$, $a$, $\Gamma$) ou vortex de Hill ($a$, $U$), $Re_\Gamma$, durée, $\Delta r$ | ≈ 15 s |
+| Deux anneaux coaxiaux | Navier–Stokes, `run_coaxial_rings` | rayon, cœur et circulation de chaque anneau, écart, $Re_\Gamma$, durée, $\Delta r$ | ≈ 1 min |
+| Filaments 3D | méthode lagrangienne, `VortexFilamentSimulation` | configuration (saute-mouton, collisions, anneau isolé, sur mesure, cœur épais), $\delta$, nœuds, durée, pas de temps | ≈ 15 s |
+| Moteurs à vortex | `BidirectionalVortexChamber`, `VortexRingThruster` | chambre ($a$, $L$, $U$, $Q$, $\rho$) et propulseur ($D$, vitesse, traînée) | ≈ 15 s |
+| Formules analytiques | module `theory` | $\Gamma$, $R$, $a/R$, type de cœur ; vortex de Hill ; $\alpha^*$ | instantané |
+
+Pour bien démarrer, choisissez un **scénario guidé** : il règle tous les paramètres et affiche « ce qu'il faut
+observer » ; certains posent une question à laquelle répondre avant le lancement, corrigée après le calcul.
+L'application vérifie aussi les garde-fous du § 3.6 et estime la durée du calcul ; cette estimation se recalibre
+après chaque calcul sur votre PC.
+
+Une fois le calcul terminé, les sous-onglets donnent les figures, une animation et une vue 3D interactives (à faire
+tourner à la souris), les courbes, les données et une fiche de résultats HTML. Deux outils servent à exploiter les
+calculs :
+
+* **📊 Comparer** superpose une grandeur (vitesse, énergie, écart des anneaux…) pour les derniers calculs du volet :
+  lancez par exemple l'anneau de référence, puis le même à $Re_\Gamma = 200$ ;
+* **🔬 Convergence** refait le calcul avec une résolution plus fine et indique, grandeur par grandeur, si l'écart
+  reste sous 1 % (§ 3.7).
+
+### 3.3 Niveau 2 — les options de la ligne de commande
+
+On ne touche pas non plus au code, et l'on obtient les figures des rapports. Pour comparer deux régimes, envoyez chacun dans son propre
 dossier avec `--out` :
 
 ```bash
@@ -201,7 +252,7 @@ les figures `axisym_speed_validation.png` et `axisym_energy_budget.png` des deux
 .venv\Scripts\python main.py particles --scenario collision --animate gif
 ```
 
-### 3.3 Niveau 2 — les scripts d'exemple (recommandé pour explorer)
+### 3.4 Niveau 3 — les scripts d'exemple (pour modifier le code pas à pas)
 
 Le dossier `exemples/` contient quatre scripts courts. En tête de chacun, un bloc « PARAMÈTRES À MODIFIER »
 regroupe les réglages. Le déroulement type :
@@ -292,7 +343,7 @@ Pour la chambre, jouez sur `U_INJECTION`, `DEBIT`, `RAYON` et `LONGUEUR` : le pa
 $\kappa = Q/(2\pi U a L)$ fixe le nombre de tours et les temps de séjour. Pour le propulseur, modifiez `D_TUYERE`
 et `U_CROISIERE`, puis observez la carte de rendement.
 
-### 3.4 Niveau 3 — modifier les réglages de `main.py`
+### 3.5 Niveau 4 — modifier les réglages de `main.py`
 
 Pour changer les cas qui produisent les figures des rapports, modifiez les valeurs dans les fonctions de
 `main.py`. Chaque réglage est commenté ; cherchez les lignes suivantes avec Ctrl + F.
@@ -309,12 +360,12 @@ Pour changer les cas qui produisent les figures des rapports, modifiez les valeu
 Attention : après `main.py all --docs`, les rapports utilisent ces nouvelles figures, alors que leurs textes
 décrivent encore les cas d'origine.
 
-### 3.5 Garde-fous numériques
+### 3.6 Garde-fous numériques
 
 | Règle | Pourquoi |
 |---|---|
 | Navier–Stokes : au moins 5 mailles par rayon de cœur ($a/\Delta r \geq 5$), 8 pour des résultats de référence | un cœur sous-résolu fausse la vitesse et la dissipation |
-| Navier–Stokes : $Re_\Gamma \lesssim 5000$ avec $\Delta r = 0{,}025$ ; au-delà, affiner $\Delta r$ | les gradients deviennent trop raides pour la grille |
+| Navier–Stokes : nombre de Péclet de maille $Pe_\Delta = u_{max}\,\Delta r/\nu \lesssim 200$ si $4 \leq a/\Delta r < 6$, $\lesssim 70$ si $a/\Delta r < 4$ ; aucune limite constatée pour $a/\Delta r \geq 6$ | au-delà, de petites oscillations du schéma créent de la vorticité négative parasite (étude jusqu'à $Re_\Gamma = 40\,000$ ; l'application affiche $Pe_\Delta$ et mesure cette vorticité parasite après chaque calcul) |
 | Navier–Stokes : le pas de temps est choisi automatiquement (critères CFL et visqueux) | rien à régler |
 | Navier–Stokes : le domaine est périodique en $z$ (longueur 10) | un anneau qui sort par le haut rentre par le bas : ce n'est pas une erreur |
 | Filaments : $2\pi R/N \leq \delta/2$ pour une précision de l'ordre du pourcent | discrétisation du noyau de Rosenhead–Moore |
@@ -322,12 +373,13 @@ décrivent encore les cas d'origine.
 | Filaments : pas de reconnexion ; en dessous de ~2δ entre filaments, la régularisation domine | limite du modèle en fluide parfait |
 | Moteurs : modèle non visqueux, valable pour $\kappa \ll 1$ | hypothèses de la solution de Vyas & Majdalani |
 
-### 3.6 Vérifier qu'un résultat est fiable
+### 3.7 Vérifier qu'un résultat est fiable
 
 * **Incompressibilité** : la divergence maximale affichée doit rester autour de $10^{-12}$.
 * **Bilan d'énergie** : dans la figure du bilan, le résidu $|E_k - E_{th}|/E_0$ doit rester inférieur à environ $10^{-4}$.
+* **Qualité numérique** : dans l'application, la vorticité négative parasite doit rester sous 0,2 % (§ 3.6).
 * **Convergence** : refaites le calcul avec un maillage deux fois plus fin (`DR` divisé par 2) ; les résultats
-  utiles doivent changer de moins de 1 %.
+  utiles doivent changer de moins de 1 %. Dans l'application, le sous-onglet « 🔬 Convergence » le fait pour vous.
 * **Comparaison à la théorie** : pour un anneau isolé, la vitesse doit suivre Saffman + Fukumoto–Moffatt à
   quelques pour cent près. Pour les filaments, le saute-mouton doit suivre le modèle coaxial.
 
@@ -350,6 +402,7 @@ figure. Le code est commenté en français ligne à ligne : chaque appel de fonc
 | Projection, pas de temps | § 4.2 | `project`, `step`, `run` | `axisym_vorticity_snapshots.png` | `test_axisymmetric_solver.py` |
 | Critères Q et λ2, dissipation | § 5.1–5.2 | `q_criterion`, `lambda2_criterion`, `dissipation_rate` | `axisym_isosurfaces.png`, `axisym_dissipation_map.png` | `test_advanced_diagnostics.py` |
 | Nombre de formation F* | § 3 | `theory.formation_number`, `VortexRingThruster` | `engine_thruster_formation.png` | `test_engine_analysis.py` |
+| Fusion des cœurs (b/σ ≈ 4) | § 5.4 | `track_rings`, volet `appli/volets/saute_mouton.py` | figure « Critère de fusion » de l'application | `test_app.py` |
 
 ### Étape 1 — La vue d'ensemble
 
@@ -444,6 +497,11 @@ Relisez `main.py` de haut en bas :
   les chiffres de `summary.json` ;
 * la liste `DOC_FIGURES` indique les figures recopiées dans les rapports par `--docs`.
 
+L'application web suit la même logique : `app.py` crée les deux onglets, puis chaque volet du dossier
+`appli/volets/` fixe ses widgets (`controles`), vérifie les garde-fous (`verifier`) et appelle les fonctions de
+`src/` dans `calculer`, comme les fonctions `run_*` de `main.py`. Le calcul tourne en arrière-plan
+(`appli/taches.py`) ; les résultats sont affichés par `appli/resultats.py`.
+
 ### Étape 9 — Les tests, fiches de vérification
 
 Chaque test énonce une propriété attendue : c'est souvent la façon la plus courte de comprendre ce qu'une
@@ -476,6 +534,9 @@ fonction doit faire. Pour afficher le nom de chaque test, ou n'exécuter que ceu
 | `Activate.ps1` est bloqué (« l'exécution de scripts est désactivée ») | ne pas activer : utiliser `.venv\Scripts\python …` ; ou autoriser une fois `Set-ExecutionPolicy -Scope CurrentUser RemoteSigned` |
 | `ModuleNotFoundError: No module named 'src'` (ou `numpy`) | lancer les commandes depuis le dossier `vortex_project`, avec `.venv\Scripts\python` |
 | Pas de fichier MP4, seulement des GIF | `ffmpeg` n'est pas installé : les GIF sont le repli automatique ; ou utiliser `--animate gif` |
-| Le calcul est trop long | ajouter `--quick`, lancer une seule partie, ou réduire `T_END` dans les exemples |
-| Valeurs `nan` ou simulation qui diverge | maillage trop grossier pour le cœur ou Reynolds trop élevé : réduire `DR` ou `RE` (voir § 3.5) |
+| Le calcul est trop long | ajouter `--quick`, lancer une seule partie, réduire `T_END` dans les exemples ; dans l'application, cliquer sur « Annuler » puis réduire la durée ou la résolution |
+| Valeurs `nan` ou simulation qui diverge | maillage trop grossier pour le cœur ou Reynolds trop élevé : réduire `DR` ou `RE` (voir § 3.6) |
+| L'application web annonce « Port 8501 is already in use » | une autre application Streamlit tourne déjà : l'arrêter, ou lancer `… streamlit run app.py --server.port 8502` |
+| Les calculs de l'application ont disparu | l'historique vit dans la mémoire du serveur : il est perdu quand on arrête `streamlit` (Ctrl+C) |
+| `ModuleNotFoundError: No module named 'streamlit'` (ou `plotly`) | réinstaller les bibliothèques : `.venv\Scripts\python -m pip install -r requirements.txt` |
 | `build_pdf.py` ne trouve pas le navigateur | indiquer le chemin de Chrome ou d'Edge dans la variable d'environnement `CHROME_PATH` |

@@ -1,0 +1,19 @@
+# Fichiers à ne pas versionner dans le dépôt du projet « Vortex toroïdaux & moteurs à vortex ».
+
+# Environnement virtuel Python (recréé par « python -m venv .venv » + « pip install -r requirements.txt »).
+.venv/
+
+# Fichiers compilés et caches de Python et de pytest.
+__pycache__/
+*.pyc
+.pytest_cache/
+
+# Calibration des durées estimées de l'application web (propre à chaque PC).
+.cache/
+
+# Résultats régénérables par main.py (les figures des rapports, elles, sont dans docs/figures).
+outputs/
+outputs_rapide/
+
+# Fichiers HTML intermédiaires de docs/build_pdf.py (option --keep-html).
+docs/_print_*.html

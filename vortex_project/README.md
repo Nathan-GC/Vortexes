@@ -15,7 +15,8 @@ applications propulsives (chambres de combustion à vortex, propulseurs pulsés)
 > **Pour débuter :** suivez le [tutoriel pas à pas](docs/tutoriel.md), aussi disponible en PDF (`docs/tutoriel.pdf`).
 > Il couvre l'installation, les premiers lancements, la modification des paramètres de l'écoulement et un
 > parcours de lecture de la théorie et du code. Les scripts du dossier `exemples/` permettent de changer
-> l'écoulement en quelques lignes.
+> l'écoulement en quelques lignes, et l'application web `app.py` réunit documentation et simulations
+> paramétrables dans le navigateur (voir [Application web](#application-web-streamlit)).
 
 ## Installation
 
@@ -66,6 +67,37 @@ Options utiles :
 portrait de phase, tubes de vorticité et rendus volumiques. `--smoke-video` y ajoute l'animation en rendu volumique
 `animations/smoke_rings_leapfrog.mp4` (≈ 4 min de plus). `--docs` recopie les figures du rapport dans `docs/figures/`.
 
+### Application web (Streamlit)
+
+```bash
+.venv\Scripts\python -m streamlit run app.py
+```
+
+Le navigateur s'ouvre sur l'application ; son adresse s'affiche aussi dans le terminal (en général
+`http://localhost:8501`). Ctrl+C dans le terminal arrête le serveur. L'application compte deux onglets :
+
+* **📚 Théorie & Documentation** : une page d'accueil (schéma annoté d'un anneau, animation, parcours conseillé et
+  accès direct aux volets), ce README, les deux rapports, le tutoriel et un glossaire. Le panneau latéral sert à
+  choisir la page, à suivre son sommaire et à télécharger sa version PDF.
+* **🚀 Simulation Interactive** : cinq volets — anneau visqueux (ou vortex de Hill), deux anneaux coaxiaux
+  (saute-mouton ou collision frontale), filaments 3D, moteurs à vortex et formules analytiques. Pour chacun :
+  * des **scénarios guidés** qui règlent tous les paramètres et disent « ce qu'il faut observer », parfois avec une
+    question « prédire puis vérifier » corrigée après le calcul ;
+  * la formule clé, un extrait du rapport (« théorie associée ») et les limites du modèle ;
+  * des garde-fous numériques (résolution a/Δr, nombre de Péclet de maille) et une durée estimée, recalibrée sur les
+    calculs déjà faits sur le PC ;
+  * le bouton **▶️ Lancer la simulation**, qui appelle directement les fonctions de `src/` dans un calcul en
+    arrière-plan (barre de progression, bouton « Annuler », documentation consultable pendant ce temps) ;
+  * les résultats : métriques avec mini-courbes, figures, animation et vue 3D interactives (Plotly, à faire tourner
+    à la souris), courbes interactives, transposition en unités physiques, **comparaison** des derniers calculs,
+    **vérification de convergence** (résolution affinée) et fiche de résultats HTML.
+
+Les calculs restent disponibles quand on recharge la page, et un calcul relancé avec les mêmes paramètres
+s'affiche instantanément. Pour alimenter la barre de progression, le solveur axisymétrique accepte une fonction de
+rappel `callback`, appelée après chaque pas de temps, comme la méthode des filaments. Le code de l'interface est
+rangé dans le paquet `appli/` (un module par rôle, un module par volet). Le fichier `.streamlit/config.toml` règle
+les thèmes clair et sombre (menu ⋮ → Settings) et désactive l'envoi de statistiques d'utilisation.
+
 ### Documents PDF
 
 Les deux rapports existent aussi en PDF : `docs/theoretical_background.pdf` et `docs/vortex_engines_analysis.pdf`.
@@ -85,15 +117,23 @@ d'environnement `CHROME_PATH` permet d'indiquer un autre navigateur.
 .venv\Scripts\python -m pytest
 ```
 
-La suite comporte 60 tests et s'exécute en ≈ 10 s. Elle vérifie notamment :
+La suite comporte 73 tests et s'exécute en ≈ 1 min 20. Les 7 tests marqués « lent » (calculs complets de
+l'application web) peuvent être écartés pour une vérification rapide (66 tests, ≈ 35 s) :
+
+```bash
+.venv\Scripts\python -m pytest -m "not lent"
+```
+
+Elle vérifie notamment :
 
 * **Biot–Savart** (`tests/test_biot_savart.py`) : centre et axe d'un anneau (Γ/2R), champ hors axe
   (intégrales elliptiques), filament infini singulier et régularisé, bornitude du noyau, divergence nulle,
   vitesse propre de Rosenhead–Moore (forme close exacte), conservation de l'impulsion et de l'énergie,
   saute-mouton comparé au modèle coaxial ;
 * **solveur axisymétrique** : divergence nulle à 1e-12, reproduction exacte de la vorticité imposée,
-  projection idempotente, vortex de Hill, invariants non visqueux, bilan d'énergie exact, vitesse proche de
-  Saffman–Fukumoto–Moffatt ;
+  projection idempotente, vortex de Hill (vitesse initiale, puis vortex visqueux), invariants non visqueux, bilan
+  d'énergie exact, vitesse proche de Saffman–Fukumoto–Moffatt, suivi de deux anneaux de circulations opposées
+  (collision frontale) ;
 * **théorie** : constantes de noyau (1/4 et 0,558 recalculées), cohérence U = ∂E/∂I, invariants de Hill ;
 * **moteurs** : temps de séjour moyen = V/Q, conservation de ψ le long des trajectoires, masse ajoutée
   (sphère → 1/2, disque → 8ρa³/3), limite de Froude du jet continu ;
@@ -102,7 +142,12 @@ La suite comporte 60 tests et s'exécute en ≈ 10 s. Elle vérifie notamment :
   torique exactes, géométrie et fermeture des tubes (nœud de trèfle sans couture), écorché, loi de
   Beer–Lambert du rendu volumique, flux de la vorticité reconstruite = Γ, anti-crénelage du « splatting » ;
 * **conversion PDF** (`tests/test_build_pdf.py`) : aucune commande LaTeX inconnue dans les rapports, formules
-  MathML bien formées, constructions de base (fractions, racines, délimiteurs, primes, `cases`), ancres du sommaire.
+  MathML bien formées, constructions de base (fractions, racines, délimiteurs, primes, `cases`), ancres du sommaire ;
+* **application web** (`tests/test_app.py`, avec `streamlit.testing`) : rendu de toutes les pages (ancres du
+  sommaire, aucune figure manquante, glossaire), boutons de la page d'accueil, scénarios guidés, valeurs du volet
+  analytique, exécution complète de chaque volet avec des réglages légers (calcul en arrière-plan, figures,
+  animation, mémoire des résultats), sous-onglets, comparaison et vérification de convergence. Ces tests sont
+  ignorés si streamlit ou plotly ne sont pas installés, et n'altèrent pas la calibration des durées du PC.
 
 ## Exemple d'utilisation en Python
 
@@ -142,6 +187,14 @@ res["U_sim"], res["U_saffman"], res["U_saffman_fm"]      # vitesses simulée et 
 
 ```text
 vortex_project/
+├── app.py                            # application web Streamlit : point d'entrée (deux onglets)
+├── appli/                            # code de l'application web
+│   ├── commun.py, calibration.py, stockage.py, taches.py   # outils, durées estimées, historique, calcul en arrière-plan
+│   ├── documentation.py, accueil.py, glossaire.py          # onglet de documentation
+│   ├── simulation.py, resultats.py, pedagogie.py, vues3d.py # onglet de simulation, résultats, aides, vues 3D Plotly
+│   └── volets/                       # un module par volet (anneau, saute_mouton, filaments, moteurs, theorie)
+├── .streamlit/config.toml            # thèmes clair et sombre de l'application web
+├── .gitignore                        # fichiers non versionnés (.venv, caches, sorties régénérables)
 ├── docs/
 │   ├── theoretical_background.md     # Phase 1 — théorie (+ version .pdf)
 │   ├── vortex_engines_analysis.md    # Phase 3 — rapport moteurs à vortex (+ version .pdf)
@@ -167,7 +220,8 @@ vortex_project/
 │   ├── test_theory.py
 │   ├── test_engine_analysis.py
 │   ├── test_advanced_diagnostics.py
-│   └── test_build_pdf.py
+│   ├── test_build_pdf.py
+│   └── test_app.py
 ├── main.py
 ├── pytest.ini
 ├── requirements.txt
@@ -180,9 +234,14 @@ vortex_project/
   la régularisation domine. Le coût est en O(M²) avec un calcul numpy vectorisé ; il n'y a pas d'arbre
   multipolaire.
 * Solveur axisymétrique : sans swirl, avec une paroi glissante en r = L_r et une périodicité en z. Il est
-  adapté aux régimes laminaires, Re_Γ ≲ 5000 à la résolution par défaut.
+  adapté aux régimes laminaires. Une étude du nombre de Péclet de maille (Pe_Δ = u_max Δr/ν) montre qu'il reste
+  stable jusqu'à Re_Γ = 40 000 ; de petites oscillations (vorticité négative parasite > 0,2 %) n'apparaissent
+  qu'avec un cœur mal résolu : au-delà de Pe_Δ ≈ 200 pour 4 ≤ a/Δr < 6, de Pe_Δ ≈ 70 pour a/Δr < 4, jamais pour
+  a/Δr ≥ 6 dans la plage testée.
 * Moteurs : modèles analytiques et semi-empiriques d'ordre de grandeur. La fermeture de surpression du
   propulseur pulsé est calibrée sur des mesures publiées (voir le rapport).
 * Visualisations 3D : rendu matplotlib (tri des facettes par profondeur, sans z-buffer). Le rendu volumique
   est un lancer de rayons numpy sur CPU, d'environ 8 s par image de 420 × 330 pixels. Les isosurfaces par
   révolution ne s'appliquent qu'aux champs axisymétriques ; les champs des filaments passent par le rendu volumique.
+* Application web : prévue pour un usage local. L'historique et la mémoire des résultats vivent dans la mémoire du
+  serveur (perdus à son redémarrage) ; un seul calcul à la fois par session.

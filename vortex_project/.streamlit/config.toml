@@ -1,0 +1,20 @@
+# Configuration de l'application Streamlit (app.py), lue au lancement depuis le dossier vortex_project.
+
+# Thèmes clair et sombre : l'application suit par défaut le réglage du système ; le menu ⋮ → Settings → Theme
+# permet de choisir. Les figures matplotlib gardent leur fond clair ; courbes et vues 3D suivent le thème.
+[theme.light]
+# Couleur d'accentuation (boutons, curseurs, onglets) : premier bleu de la palette SERIES du projet.
+primaryColor = "#2a78d6"
+
+[theme.dark]
+# Bleu plus clair, lisible sur fond sombre (rampe bleue du projet).
+primaryColor = "#6da7ec"
+
+[server]
+# Application accessible depuis ce PC seulement (adresse locale) ; supprimer cette ligne pour la partager sur le
+# réseau local (les autres postes pourraient alors lancer des calculs).
+address = "localhost"
+
+[browser]
+# Aucune statistique d'utilisation envoyée à Streamlit.
+gatherUsageStats = false
