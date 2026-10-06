@@ -1,0 +1,4 @@
+# Fichiers à ne pas versionner à la racine du dépôt (les règles du projet sont dans vortex_project/.gitignore).
+
+# Configuration locale des outils de développement (prévisualisation de Claude Code), propre à ce poste.
+.claude/
